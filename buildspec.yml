@@ -1,64 +1,24 @@
----
-AWSTemplateFormatVersion: 2010-09-09
 version: 0.2
 
-Parameters:
-  GitHubUrl:
-    Type: String
-  LogGroup:
-    Type: String
-  LogStream:
-    Type: String
-
-Resources:
-  CodeBuildProject:
-    Type: AWS::CodeBuild::Project
-    Properties:
-      Artifacts:
-        Type: NO_ARTIFACTS
-      Source:
-        Type: GITHUB
-        Location: !Ref GitHubUrl
-        Auth: 
-          Type: OAUTH
-      Environment:
-        ComputeType: BUILD_GENERAL1_SMALL
-        Image: aws/codebuild/standard:latest
-        Type: LINUX_CONTAINER
-      LogsConfig:
-        CloudWatchLogs: 
-          GroupName: !Ref LogGroup
-          Status: ENABLED
-          StreamName: !Ref LogStream
-      Triggers:
-        FilterGroups: 
-          - - Type: EVENT
-              Pattern: PUSH
-        Webhook: True
-      Name: !Ref AWS::StackName
-      ServiceRole: !Ref CodeBuildServiceRole
-
-  CodeBuildServiceRole:
-    Type: AWS::IAM::Role
-    Properties:
-      Path: /
-      AssumeRolePolicyDocument:
-        Version: 2012-10-17
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: codebuild.amazonaws.com
-            Action: sts:AssumeRole
-      Policies:
-        - PolicyName: root
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Resource: "*"
-                Effect: Allow
-                Action:
-                  - logs:CreateLogGroup
-                  - logs:CreateLogStream
-                  - logs:PutLogEvents
-
-
+phases:
+  install:
+    runtime-versions:
+      java: openjdk8
+  pre_build:
+    commands:
+      - AWS_ACC=$(echo $CODEBUILD_BUILD_ARN | cut -d':' -f5)
+      - REPOSITORY_URI=$AWS_ACC.dkr.ecr.$AWS_REGION.amazonaws.com
+  build:
+    commands:
+      - echo Build started on `date`
+      - mvn package
+      - docker build . -t $REPOSITORY_URI/${REPO}:latest
+      - echo Build completed on `date`
+  post_build:
+    commands:
+      - $(aws ecr get-login --region $AWS_REGION --no-include-email)
+      - aws ecr describe-repositories --registry-id ${AWS_ACC} --repository-name ${REPO}
+      - docker push $REPOSITORY_URI/${REPO}:latest
+artifacts:
+  files:
+    - target/spring-petclinic-2.2.0.BUILD-SNAPSHOT.jar
